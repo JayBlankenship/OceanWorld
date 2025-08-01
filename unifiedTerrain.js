@@ -138,7 +138,7 @@ export class UnifiedTerrain {
         const material = new THREE.MeshBasicMaterial({
             vertexColors: true,
             transparent: true,
-            opacity: 0.85,
+            opacity: 0.9, // Slightly more opaque for better water surface visibility
             side: THREE.DoubleSide,
             wireframe: false
         });

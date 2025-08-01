@@ -73,18 +73,17 @@ export class TerrainPlane {
         this.blockGroup = new THREE.Group();
         this.scene.add(this.blockGroup);
 
-        // Terrain parameters for solid connected terrain
+        // Terrain parameters for water surface
         const gridCells = 6; // Reduced resolution for better performance
         const baseSize = this.planeSize / gridCells; // Exact tile size for seamless connection
-        const terrainColor = 0x00ff00; // Neon green
 
-        // Add only the digital landscape wireframe mesh
-        this.landscapeWireframe = this.createLandscapeWireframe(gridCells, baseSize, terrainColor);
+        // Add only the digital landscape wireframe mesh with water surface
+        this.landscapeWireframe = this.createLandscapeWireframe(gridCells, baseSize);
         this.blockGroup.add(this.landscapeWireframe);
     }
 
     // Helper to create a single triangulated wireframe mesh for the tile
-    createLandscapeWireframe(gridCells, baseSize, terrainColor) {
+    createLandscapeWireframe(gridCells, baseSize) {
         const geometry = new THREE.BufferGeometry();
         const vertices = [];
         const indices = [];
@@ -130,13 +129,13 @@ export class TerrainPlane {
         geometry.setIndex(indices);
         geometry.computeVertexNormals();
         
-        // Create solid mesh material instead of wireframe for connected appearance
+        // Create water-like material with animated surface effects
         const material = new THREE.MeshBasicMaterial({
-            color: terrainColor,
+            color: 0x006699, // Deep ocean blue
             transparent: true,
-            opacity: 0.8,
+            opacity: 0.85, // Semi-transparent for water effect
             side: THREE.DoubleSide,
-            wireframe: false // Solid surface instead of lines
+            wireframe: false // Solid surface
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.geometry = geometry;
@@ -207,17 +206,38 @@ export class TerrainPlane {
         this.rotation += deltaTime * this.rotationSpeed * stormRotationMultiplier;
         this.blockGroup.rotation.y = this.rotation;
         
-        // Storm color effects on wireframe
-        if (this.landscapeWireframe.material && this.stormIntensity > 0) {
-            const stormOpacity = 0.95 + this.stormIntensity * 0.05; // Slightly brighter during storms
-            this.landscapeWireframe.material.opacity = Math.min(stormOpacity, 1.0);
+        // Water surface color effects based on wave motion
+        if (this.landscapeWireframe.material) {
+            // Animate water color based on wave phase for realistic water surface
+            const waveColorIntensity = Math.sin(this.wavePhase * 0.5) * 0.3 + 0.7;
+            const baseBlue = 0.6 * waveColorIntensity;
+            const greenTint = 0.4 * waveColorIntensity;
             
-            // Add red tint during severe storms
-            if (this.stormIntensity > 1.0) {
-                const redTint = (this.stormIntensity - 1.0) * 0.3;
-                this.landscapeWireframe.material.color.setRGB(redTint, 1.0 - redTint * 0.3, 0);
+            // Storm color effects on water surface
+            if (this.stormIntensity > 0) {
+                const stormOpacity = 0.9 + this.stormIntensity * 0.1; // More opaque during storms
+                this.landscapeWireframe.material.opacity = Math.min(stormOpacity, 1.0);
+                
+                // Add darker, more turbulent colors during storms
+                if (this.stormIntensity > 1.0) {
+                    const darkening = (this.stormIntensity - 1.0) * 0.4;
+                    this.landscapeWireframe.material.color.setRGB(
+                        darkening * 0.2, 
+                        greenTint * (1.0 - darkening * 0.5), 
+                        baseBlue * (1.0 - darkening * 0.3)
+                    );
+                } else {
+                    // Slight greenish tint during mild storms (choppy water)
+                    this.landscapeWireframe.material.color.setRGB(
+                        0, 
+                        greenTint + this.stormIntensity * 0.2, 
+                        baseBlue
+                    );
+                }
             } else {
-                this.landscapeWireframe.material.color.setRGB(0, 1.0, 0); // Reset to green
+                // Normal water colors - deep ocean blue with subtle green
+                this.landscapeWireframe.material.opacity = 0.85;
+                this.landscapeWireframe.material.color.setRGB(0, greenTint, baseBlue);
             }
         }
         

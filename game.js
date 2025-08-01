@@ -16,20 +16,52 @@ let globalOceanWaveState = {
 let globalOceanSize = 120;
 
 function createGlobalOcean(scene, size = 120, segments = 64) {
-    // Increase ocean mesh size and resolution to cover the expanded terrain area
+    // Create a large transparent ocean surface that sits above the terrain
     size = 2400; // Doubled from 1200
-    segments = 512; // Increased resolution for smoother waves over larger area
+    segments = 128; // Reduced for better performance but still smooth
     const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
     geometry.rotateX(-Math.PI / 2);
+    
+    // Add vertex colors for enhanced depth effect with multiple gradients
+    const colors = [];
+    const positions = geometry.attributes.position.array;
+    for (let i = 0; i < positions.length; i += 3) {
+        const x = positions[i];
+        const z = positions[i + 2];
+        const distanceFromCenter = Math.sqrt(x * x + z * z);
+        const maxDistance = size * 0.4;
+        const depthFactor = Math.min(distanceFromCenter / maxDistance, 1.0);
+        
+        // Enhanced depth gradient with more dramatic color transition
+        // Darker blue variations - shallow (dark blue) to deep ocean (very dark navy)
+        const shallowR = 0.0, shallowG = 0.3, shallowB = 0.7; // Dark blue instead of turquoise
+        const deepR = 0.0, deepG = 0.05, deepB = 0.3; // Very dark navy
+        
+        // Reduced wave-based color variation to preserve depth perception
+        const wavePattern = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 0.03; // Reduced from 0.1
+        const wavePattern2 = Math.sin(x * 0.02 + z * 0.015) * 0.02; // Reduced from 0.05
+        const totalWaveEffect = (wavePattern + wavePattern2) * (1 - depthFactor * 0.8);
+        
+        // Interpolate between shallow and deep colors with stronger contrast
+        const r = shallowR + (deepR - shallowR) * depthFactor + totalWaveEffect * 0.5;
+        const g = shallowG + (deepG - shallowG) * depthFactor + totalWaveEffect * 0.2;
+        const b = shallowB + (deepB - shallowB) * depthFactor;
+        
+        colors.push(Math.max(0, Math.min(1, r)), Math.max(0, Math.min(1, g)), Math.max(0, Math.min(1, b)));
+    }
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    
     const material = new THREE.MeshBasicMaterial({
-        color: 0x00fff7,
-        wireframe: true,
-        transparent: false,
-        opacity: 1.0
+        vertexColors: true, // Use vertex colors for enhanced depth effect
+        wireframe: false, // Solid surface, not wireframe
+        transparent: false, // Remove transparency to fix visibility issues
+        side: THREE.DoubleSide // Render both sides to prevent culling
     });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(0, 0.1, 0);
+    mesh.position.set(0, 20.0, 0); // Position ocean surface properly relative to player height
+    mesh.name = "globalOceanSurface"; // Add name for debugging
     scene.add(mesh);
+    console.log("Ocean surface created at position:", mesh.position, "with opacity:", material.opacity);
     globalOcean = mesh;
     globalOceanGeometry = geometry;
     globalOceanSegments = segments;
@@ -182,24 +214,24 @@ function initGame() {
         wireframe: true
     });
 
-    // Initialize TerrainGenerator
+    // Initialize TerrainGenerator 
     const terrainGenerator = new TerrainGenerator(scene, planeSize, planeGeometry, planeMaterial);
 
-    // Set up terrain networking callback after terrainGenerator is created
-    if (window.Network) {
-        // Handle incoming terrain changes from other clients
-        window.Network.callbacks.handleTerrainChanges = (peerId, changes) => {
-            console.log(`[Game] Received terrain changes from ${peerId}:`, changes);
-            try {
-                terrainGenerator.applyTerrainChanges(changes);
-            } catch (error) {
-                console.error('[Game] Error applying terrain changes:', error);
-            }
-        };
-    }
+    // Set up terrain networking callback after terrainGenerator is created - temporarily disabled
+    // if (window.Network) {
+    //     // Handle incoming terrain changes from other clients
+    //     window.Network.callbacks.handleTerrainChanges = (peerId, changes) => {
+    //         console.log(`[Game] Received terrain changes from ${peerId}:`, changes);
+    //         try {
+    //             terrainGenerator.applyTerrainChanges(changes);
+    //         } catch (error) {
+    //             console.error('[Game] Error applying terrain changes:', error);
+    //         }
+    //     };
+    // }
 
-    // Initial camera position
-    camera.position.set(0, 5, -10);
+    // Initial camera position - pulled back further for better ocean view
+    camera.position.set(0, 8, -18);
     camera.lookAt(playerPawn.position);
 
     // Calculate initial theta and phi
@@ -434,7 +466,7 @@ function initGame() {
                 // Center ocean on player
                 globalOcean.position.x = playerPawn.position.x;
                 globalOcean.position.z = playerPawn.position.z;
-                globalOcean.position.y = 22.5; // Raised 20 units higher
+                globalOcean.position.y = 20.0; // Match the mesh creation position
                 globalOceanTime += deltaTime * globalOceanWaveState.speed;
                 const pos = globalOceanGeometry.attributes.position;
                 const seg = globalOceanSegments;
@@ -476,9 +508,13 @@ function initGame() {
                         y += Math.cos(0.08 * z + t * 0.5) * 1.0 * getLocalWaveMultiplier(x, z);
                         y += Math.sin(0.07 * (x + z) + t * 0.3) * 0.7 * getLocalWaveMultiplier(x, z);
                         pos.setY(idx, y);
+                        
+                        // Skip dynamic color updates to prevent visibility issues
+                        // The static depth colors set during creation are sufficient
                     }
                 }
                 pos.needsUpdate = true;
+                // Skip color updates to prevent rendering issues
                 globalOceanGeometry.computeVertexNormals();
             }
             // Broadcast our position to other players if we're in a complete lobby
