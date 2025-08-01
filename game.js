@@ -6,12 +6,14 @@ let globalOceanGeometry = null;
 let globalOceanSegments = 64;
 let globalOceanTime = Math.random() * 1000;
 let globalOceanWaveState = {
-    amp: 0.5, // Calmer default amplitude
-    speed: 1.5, // Calmer default speed
-    targetAmp: 0.5,
-    targetSpeed: 1.5,
+    amp: 0.8, // More intense default amplitude
+    speed: 2.0, // Faster default speed
+    targetAmp: 0.8,
+    targetSpeed: 2.0,
     timer: 0,
-    storms: [] // Array of active storm systems
+    storms: [], // Array of active storm systems
+    stormIntensity: 0.5, // Global storm intensity factor
+    maxStorms: 4 // Allow more simultaneous storms
 };
 let globalOceanSize = 120;
 
@@ -32,20 +34,80 @@ function createGlobalOcean(scene, size = 120, segments = 64) {
         const maxDistance = size * 0.4;
         const depthFactor = Math.min(distanceFromCenter / maxDistance, 1.0);
         
-        // Enhanced depth gradient with more dramatic color transition
-        // Darker blue variations - shallow (dark blue) to deep ocean (very dark navy)
-        const shallowR = 0.0, shallowG = 0.3, shallowB = 0.7; // Dark blue instead of turquoise
-        const deepR = 0.0, deepG = 0.05, deepB = 0.3; // Very dark navy
+        // Enhanced depth gradient with dramatic color transitions and storm effects
+        // Base ocean colors - darker blue variations
+        const calmShallowR = 0.0, calmShallowG = 0.3, calmShallowB = 0.7; // Dark blue
+        const calmDeepR = 0.0, calmDeepG = 0.05, calmDeepB = 0.3; // Very dark navy
         
-        // Reduced wave-based color variation to preserve depth perception
-        const wavePattern = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 0.03; // Reduced from 0.1
-        const wavePattern2 = Math.sin(x * 0.02 + z * 0.015) * 0.02; // Reduced from 0.05
-        const totalWaveEffect = (wavePattern + wavePattern2) * (1 - depthFactor * 0.8);
+        // Storm colors - greens, grays, and darker blues emerge during storms
+        const stormShallowR = 0.1, stormShallowG = 0.4, stormShallowB = 0.5; // Stormy blue-green
+        const stormDeepR = 0.05, stormDeepG = 0.15, stormDeepB = 0.2; // Dark gray-blue
         
-        // Interpolate between shallow and deep colors with stronger contrast
-        const r = shallowR + (deepR - shallowR) * depthFactor + totalWaveEffect * 0.5;
-        const g = shallowG + (deepG - shallowG) * depthFactor + totalWaveEffect * 0.2;
-        const b = shallowB + (deepB - shallowB) * depthFactor;
+        // Foam and turbulence colors - whites and light blues
+        const foamR = 0.8, foamG = 0.9, foamB = 1.0; // White foam
+        const turbulenceR = 0.4, turbulenceG = 0.6, turbulenceB = 0.8; // Light stormy blue
+        
+        // Calculate storm intensity at this location
+        let stormIntensity = 0;
+        const globalStormFactor = Math.sin(x * 0.002 + z * 0.003) * Math.cos(x * 0.001 - z * 0.004);
+        stormIntensity = Math.max(0, globalStormFactor * 0.5 + 0.3); // Always some storm potential
+        
+        // Distance-based storm variation - storms can be more intense in different areas
+        const distanceStorm = Math.sin(distanceFromCenter * 0.001) * 0.3;
+        stormIntensity += distanceStorm;
+        stormIntensity = Math.max(0, Math.min(1, stormIntensity));
+        
+        // Multiple wave-based color layers for texture with storm enhancement
+        const wavePattern1 = Math.sin(x * 0.008) * Math.cos(z * 0.012) * (0.04 + stormIntensity * 0.06); // Large waves - storm enhanced
+        const wavePattern2 = Math.sin(x * 0.025 + z * 0.018) * (0.025 + stormIntensity * 0.04); // Medium waves
+        const wavePattern3 = Math.sin(x * 0.045) * Math.cos(z * 0.038) * (0.015 + stormIntensity * 0.03); // Small ripples
+        const wavePattern4 = Math.cos(x * 0.06 + z * 0.052) * (0.01 + stormIntensity * 0.02); // Fine detail
+        
+        // Foam/whitecap simulation - much stronger during storms
+        const foamPattern = Math.sin(x * 0.1) * Math.cos(z * 0.08) * (1 - depthFactor) * (0.02 + stormIntensity * 0.08);
+        
+        // Turbulence patterns that emerge during storms
+        const turbulencePattern1 = Math.sin(x * 0.15) * Math.cos(z * 0.12) * stormIntensity * 0.05;
+        const turbulencePattern2 = Math.cos(x * 0.2 + z * 0.18) * stormIntensity * 0.03;
+        
+        // Combine all wave patterns
+        const totalWaveEffect = (wavePattern1 + wavePattern2 + wavePattern3 + wavePattern4) * (1 - depthFactor * 0.4);
+        const totalFoamEffect = foamPattern + turbulencePattern1 + turbulencePattern2;
+        
+        // Additional color variation for natural look with storm chaos
+        const colorVariation1 = Math.sin(x * 0.03 + z * 0.04) * (0.015 + stormIntensity * 0.025);
+        const colorVariation2 = Math.cos(x * 0.07 - z * 0.02) * (0.01 + stormIntensity * 0.02);
+        const stormChaos = Math.sin(x * 0.08 + z * 0.09) * Math.cos(x * 0.11 - z * 0.07) * stormIntensity * 0.04;
+        
+        // Interpolate between calm and storm colors based on storm intensity
+        const baseShallowR = calmShallowR + (stormShallowR - calmShallowR) * stormIntensity;
+        const baseShallowG = calmShallowG + (stormShallowG - calmShallowG) * stormIntensity;
+        const baseShallowB = calmShallowB + (stormShallowB - calmShallowB) * stormIntensity;
+        
+        const baseDeepR = calmDeepR + (stormDeepR - calmDeepR) * stormIntensity;
+        const baseDeepG = calmDeepG + (stormDeepG - calmDeepG) * stormIntensity;
+        const baseDeepB = calmDeepB + (stormDeepB - calmDeepB) * stormIntensity;
+        
+        // Apply depth gradient with storm colors
+        let r = baseShallowR + (baseDeepR - baseShallowR) * depthFactor;
+        let g = baseShallowG + (baseDeepG - baseShallowG) * depthFactor;
+        let b = baseShallowB + (baseDeepB - baseShallowB) * depthFactor;
+        
+        // Add wave effects
+        r += totalWaveEffect * 0.3 + colorVariation1 + stormChaos;
+        g += totalWaveEffect * 0.4 + colorVariation2 + stormChaos * 0.5;
+        b += totalWaveEffect * 0.2 + stormChaos * 0.3;
+        
+        // Add foam/turbulence effects (lighter colors)
+        const foamStrength = Math.max(0, totalFoamEffect);
+        r += foamStrength * foamR * 0.3;
+        g += foamStrength * foamG * 0.3;
+        b += foamStrength * foamB * 0.3;
+        
+        // Add turbulence coloring (stormy blues and greens)
+        r += stormIntensity * turbulenceR * 0.1;
+        g += stormIntensity * turbulenceG * 0.15;
+        b += stormIntensity * turbulenceB * 0.1;
         
         colors.push(Math.max(0, Math.min(1, r)), Math.max(0, Math.min(1, g)), Math.max(0, Math.min(1, b)));
     }
@@ -411,21 +473,22 @@ function initGame() {
                 // --- Storm system: storms can form, move, and swirl toward the player ---
                 // Update storms
                 if (!globalOceanWaveState.storms) globalOceanWaveState.storms = [];
-                // Occasionally spawn a new storm far from the player
-                if (Math.random() < deltaTime * 0.04 && globalOceanWaveState.storms.length < 2) {
-                    // Storms spawn 1600-3600 units from player, random angle (doubled)
+                // More frequent storm spawning with higher intensity
+                if (Math.random() < deltaTime * 0.08 && globalOceanWaveState.storms.length < globalOceanWaveState.maxStorms) {
+                    // Storms spawn closer and more frequently
                     const angle = Math.random() * Math.PI * 2;
-                    const dist = 1600 + Math.random() * 2000; // Doubled from 800 + 1000
+                    const dist = 800 + Math.random() * 1500; // Closer storms
                     globalOceanWaveState.storms.push({
                         x: playerPawn.position.x + Math.cos(angle) * dist,
                         z: playerPawn.position.z + Math.sin(angle) * dist,
-                        amp: 2 + Math.random() * 3, // Lower, more natural waves
-                        radius: 700 + Math.random() * 400, // Doubled from 350 + 200
+                        amp: 3 + Math.random() * 5, // Much more intense waves (was 2-5, now 3-8)
+                        radius: 600 + Math.random() * 800, // Larger storm radius
                         swirl: Math.random() * Math.PI * 2,
-                        swirlSpeed: 0.1 + Math.random() * 0.2,
-                        moveSpeed: 3 + Math.random() * 3,
+                        swirlSpeed: 0.2 + Math.random() * 0.4, // Faster swirling
+                        moveSpeed: 4 + Math.random() * 6, // Faster moving storms
                         target: { x: playerPawn.position.x, z: playerPawn.position.z },
-                        age: 0
+                        age: 0,
+                        intensity: 0.7 + Math.random() * 0.3 // Storm color intensity
                     });
                 }
                 // Move storms toward the player, swirl them
@@ -448,21 +511,24 @@ function initGame() {
                 // Bipolar ocean: smoothly interpolate between extreme and chill states
                 globalOceanWaveState.timer -= deltaTime;
                 if (globalOceanWaveState.timer <= 0) {
-                    // Randomly pick a new target state: either 'insane' or 'chill'
-                    if (Math.random() < 0.5) {
-                        // Insane: high amp, high speed (but can be overridden by storms)
-                        globalOceanWaveState.targetAmp = 1.2 + Math.random() * 0.7;
-                        globalOceanWaveState.targetSpeed = 2.5 + Math.random() * 1.0;
+                    // More extreme weather patterns
+                    if (Math.random() < 0.6) { // 60% chance for storms vs 40% calm
+                        // Extreme storm: very high amp and speed
+                        globalOceanWaveState.targetAmp = 2.0 + Math.random() * 2.5; // Much more intense (was 1.2-1.9)
+                        globalOceanWaveState.targetSpeed = 3.5 + Math.random() * 2.0; // Faster waves
+                        globalOceanWaveState.stormIntensity = 0.8 + Math.random() * 0.2; // High storm intensity
                     } else {
-                        // Chill: low amp, low speed (but never stagnant)
-                        globalOceanWaveState.targetAmp = 0.2 + Math.random() * 0.15;
-                        globalOceanWaveState.targetSpeed = 0.7 + Math.random() * 0.3;
+                        // Brief calm: low amp and speed (shorter duration)
+                        globalOceanWaveState.targetAmp = 0.3 + Math.random() * 0.4;
+                        globalOceanWaveState.targetSpeed = 1.0 + Math.random() * 0.8;
+                        globalOceanWaveState.stormIntensity = 0.1 + Math.random() * 0.2; // Low storm intensity
                     }
-                    globalOceanWaveState.timer = 8 + Math.random() * 8;
+                    globalOceanWaveState.timer = 6 + Math.random() * 6; // Shorter cycles for more dynamic weather
                 }
-                // Slow down interpolation for smoother, longer transitions
-                globalOceanWaveState.amp += (globalOceanWaveState.targetAmp - globalOceanWaveState.amp) * deltaTime * 0.18;
-                globalOceanWaveState.speed += (globalOceanWaveState.targetSpeed - globalOceanWaveState.speed) * deltaTime * 0.18;
+                // Faster interpolation for more dynamic weather changes
+                globalOceanWaveState.amp += (globalOceanWaveState.targetAmp - globalOceanWaveState.amp) * deltaTime * 0.25;
+                globalOceanWaveState.speed += (globalOceanWaveState.targetSpeed - globalOceanWaveState.speed) * deltaTime * 0.25;
+                globalOceanWaveState.stormIntensity += (globalOceanWaveState.stormIntensity - globalOceanWaveState.stormIntensity) * deltaTime * 0.2;
                 // Center ocean on player
                 globalOcean.position.x = playerPawn.position.x;
                 globalOcean.position.z = playerPawn.position.z;
