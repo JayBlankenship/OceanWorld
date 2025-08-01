@@ -34,6 +34,15 @@ export class TerrainGenerator {
         // For networking: track changes since last frame
         this.newPlanes = new Set(); // Track newly created planes for networking
         this.removedPlanes = new Set(); // Track removed planes for networking
+        
+        // Bad Storm System for terrain effects
+        this.stormSystem = {
+            storms: [], // Array of active terrain storms
+            timer: 0,
+            stormSpawnChance: 0.03, // Low chance per second to spawn storm
+            maxStorms: 3,
+            stormLifetime: 60 // Storm lasts 60 seconds
+        };
     }
 
     // Convert world position to grid coordinates
@@ -94,6 +103,79 @@ export class TerrainGenerator {
                 }
             }
         }
+    }
+
+    // Update the storm system
+    updateStormSystem(deltaTime, playerPosition) {
+        this.stormSystem.timer += deltaTime;
+        
+        // Try to spawn new storms
+        if (Math.random() < deltaTime * this.stormSystem.stormSpawnChance && 
+            this.stormSystem.storms.length < this.stormSystem.maxStorms) {
+            
+            // Spawn storm at random location around player
+            const angle = Math.random() * Math.PI * 2;
+            const distance = 200 + Math.random() * 300; // 200-500 units from player
+            
+            const storm = {
+                id: Math.random().toString(36).substr(2, 9),
+                x: playerPosition.x + Math.cos(angle) * distance,
+                z: playerPosition.z + Math.sin(angle) * distance,
+                intensity: 0.5 + Math.random() * 1.0, // Storm intensity 0.5-1.5
+                radius: 100 + Math.random() * 150, // Storm radius 100-250
+                age: 0,
+                maxAge: this.stormSystem.stormLifetime,
+                rotationSpeed: (Math.random() - 0.5) * 2.0, // Random rotation
+                pulsePhase: Math.random() * Math.PI * 2
+            };
+            
+            this.stormSystem.storms.push(storm);
+            console.log(`[TerrainGenerator] Spawned bad storm at (${storm.x.toFixed(1)}, ${storm.z.toFixed(1)}) with intensity ${storm.intensity.toFixed(2)}`);
+        }
+        
+        // Update existing storms
+        this.stormSystem.storms.forEach(storm => {
+            storm.age += deltaTime;
+            storm.pulsePhase += deltaTime * 3.0; // Fast pulsing for dramatic effect
+            
+            // Storms slowly drift toward player for more dynamic gameplay
+            const dx = playerPosition.x - storm.x;
+            const dz = playerPosition.z - storm.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            if (distance > 50) {
+                const driftSpeed = 2.0; // Slow drift toward player
+                storm.x += (dx / distance) * driftSpeed * deltaTime;
+                storm.z += (dz / distance) * driftSpeed * deltaTime;
+            }
+        });
+        
+        // Remove expired storms
+        this.stormSystem.storms = this.stormSystem.storms.filter(storm => storm.age < storm.maxAge);
+    }
+
+    // Get storm intensity at a given world position
+    getStormIntensityAtPosition(x, z) {
+        let totalIntensity = 0;
+        
+        this.stormSystem.storms.forEach(storm => {
+            const dx = x - storm.x;
+            const dz = z - storm.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            if (distance < storm.radius) {
+                // Calculate falloff from storm center
+                const falloff = 1.0 - (distance / storm.radius);
+                const stormEffect = falloff * storm.intensity;
+                
+                // Add pulsing effect
+                const pulse = Math.sin(storm.pulsePhase) * 0.3 + 0.7; // 0.4-1.0 multiplier
+                
+                totalIntensity += stormEffect * pulse;
+            }
+        });
+        
+        return Math.min(totalIntensity, 2.0); // Cap at 2.0 for extreme storms
     }
 
     // Remove distant planes (disabled: keep all terrain tiles loaded)

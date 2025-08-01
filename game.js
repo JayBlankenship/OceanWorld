@@ -133,9 +133,14 @@ function initGame() {
             // Update global player position for exclusion zone logic
             window.playerPosition = playerPawn.position.clone();
 
-            // Dynamically update exclusion zone for all terrain tiles every frame
+            // Update terrain storm system
+            if (terrainGenerator && typeof terrainGenerator.updateStormSystem === 'function') {
+                terrainGenerator.updateStormSystem(deltaTime, playerPawn.position);
+            }
+
+            // Dynamically update terrain tiles with storm effects every frame
             if (terrainGenerator && terrainGenerator.planes && typeof window.updateExclusionZoneEveryFrame === 'function') {
-                window.updateExclusionZoneEveryFrame(Array.from(terrainGenerator.planes.values()));
+                window.updateExclusionZoneEveryFrame(Array.from(terrainGenerator.planes.values()), terrainGenerator);
             }
                 for (const peerId of existingPeerIds) {
                     if (!currentPeerIds.includes(peerId)) {
