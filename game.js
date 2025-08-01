@@ -17,8 +17,8 @@ let globalOceanSize = 120;
 
 function createGlobalOcean(scene, size = 120, segments = 64) {
     // Increase ocean mesh size and resolution to cover the expanded terrain area
-    size = 1200;
-    segments = 256; // Higher resolution for smoother waves
+    size = 2400; // Doubled from 1200
+    segments = 512; // Increased resolution for smoother waves over larger area
     const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
     geometry.rotateX(-Math.PI / 2);
     const material = new THREE.MeshBasicMaterial({
@@ -381,14 +381,14 @@ function initGame() {
                 if (!globalOceanWaveState.storms) globalOceanWaveState.storms = [];
                 // Occasionally spawn a new storm far from the player
                 if (Math.random() < deltaTime * 0.04 && globalOceanWaveState.storms.length < 2) {
-                    // Storms spawn 800-1800 units from player, random angle
+                    // Storms spawn 1600-3600 units from player, random angle (doubled)
                     const angle = Math.random() * Math.PI * 2;
-                    const dist = 800 + Math.random() * 1000;
+                    const dist = 1600 + Math.random() * 2000; // Doubled from 800 + 1000
                     globalOceanWaveState.storms.push({
                         x: playerPawn.position.x + Math.cos(angle) * dist,
                         z: playerPawn.position.z + Math.sin(angle) * dist,
                         amp: 2 + Math.random() * 3, // Lower, more natural waves
-                        radius: 350 + Math.random() * 200, // Much larger, more gradual
+                        radius: 700 + Math.random() * 400, // Doubled from 350 + 200
                         swirl: Math.random() * Math.PI * 2,
                         swirlSpeed: 0.1 + Math.random() * 0.2,
                         moveSpeed: 3 + Math.random() * 3,

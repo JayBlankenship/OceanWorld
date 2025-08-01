@@ -73,9 +73,9 @@ export class TerrainPlane {
         this.blockGroup = new THREE.Group();
         this.scene.add(this.blockGroup);
 
-        // Terrain parameters for wireframe only
-        const gridCells = 8; // Higher resolution for smoother terrain
-        const baseSize = (this.planeSize / gridCells) * 1.5;
+        // Terrain parameters for solid connected terrain
+        const gridCells = 6; // Reduced resolution for better performance
+        const baseSize = this.planeSize / gridCells; // Exact tile size for seamless connection
         const terrainColor = 0x00ff00; // Neon green
 
         // Add only the digital landscape wireframe mesh
@@ -89,27 +89,25 @@ export class TerrainPlane {
         const vertices = [];
         const indices = [];
         
-        // Generate rocky terrain with procedural noise
+        // Generate smooth rocky outcrop terrain with flowing features
         for (let x = 0; x <= gridCells; x++) {
             for (let z = 0; z <= gridCells; z++) {
-                const spreadFactor = 1.2; // Adjusted for terrain wireframe
-                const px = this.position.x + (x - gridCells / 2) * baseSize * spreadFactor;
-                const pz = this.position.z + (z - gridCells / 2) * baseSize * spreadFactor;
+                // Calculate world position to ensure tiles connect seamlessly
+                const px = this.position.x + (x - gridCells / 2) * baseSize;
+                const pz = this.position.z + (z - gridCells / 2) * baseSize;
                 
-                // Create rocky base height using multiple noise layers
-                let baseHeight = this.position.y + baseSize / 2;
+                // Create flowing rocky outcrop base height (simplified for performance)
+                let baseHeight = this.position.y;
                 
-                // Large-scale terrain features (hills and valleys)
-                const largeScale = this.generateNoise(px * 0.02, pz * 0.02) * 3.0;
+                // Simplified terrain generation for better performance
+                const primaryFlow = this.generateNoise(px * 0.02, pz * 0.02) * 2.5;
+                const secondaryFlow = this.generateNoise(px * 0.06, pz * 0.06) * 1.2;
                 
-                // Medium-scale rocky features
-                const mediumScale = this.generateNoise(px * 0.05, pz * 0.05) * 1.5;
+                // Simple ridge pattern
+                const ridgePattern = Math.sin(px * 0.03 + pz * 0.02) * 0.8;
                 
-                // Small-scale detail (surface roughness)
-                const smallScale = this.generateNoise(px * 0.15, pz * 0.15) * 0.8;
-                
-                // Combine all scales for realistic terrain
-                const rockyHeight = largeScale + mediumScale + smallScale;
+                // Combine for smooth rocky appearance
+                const rockyHeight = primaryFlow + secondaryFlow + ridgePattern;
                 const py = baseHeight + rockyHeight;
                 
                 vertices.push(px, py, pz);
@@ -131,14 +129,16 @@ export class TerrainPlane {
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
         geometry.setIndex(indices);
         geometry.computeVertexNormals();
-        const wireframe = new THREE.WireframeGeometry(geometry);
-        const material = new THREE.LineBasicMaterial({
+        
+        // Create solid mesh material instead of wireframe for connected appearance
+        const material = new THREE.MeshBasicMaterial({
             color: terrainColor,
-            linewidth: 2,
             transparent: true,
-            opacity: 0.95
+            opacity: 0.8,
+            side: THREE.DoubleSide,
+            wireframe: false // Solid surface instead of lines
         });
-        const mesh = new THREE.LineSegments(wireframe, material);
+        const mesh = new THREE.Mesh(geometry, material);
         mesh.geometry = geometry;
         
         // Store base heights for animation reference
@@ -147,23 +147,33 @@ export class TerrainPlane {
         return mesh;
     }
 
-    // Simple noise function for procedural terrain generation
+    // Enhanced noise function for smooth flowing rocky outcrops
     generateNoise(x, z) {
         // Simple pseudo-random noise based on position
         const seed = this.gridX * 1000 + this.gridZ; // Tile-specific seed for consistency
         
-        // Multiple octaves of sine-based noise
+        // Multiple octaves of smooth sine-based noise for flowing terrain
         let noise = 0;
-        noise += Math.sin(x + seed) * 0.5;
-        noise += Math.sin(z + seed * 1.3) * 0.3;
-        noise += Math.sin(x * 2.1 + z * 1.7 + seed * 0.7) * 0.2;
-        noise += Math.sin(x * 3.3 + z * 2.9 + seed * 1.9) * 0.1;
         
-        // Add some randomness based on position
-        const hash = Math.sin(x * 12.9898 + z * 78.233 + seed) * 43758.5453;
-        noise += (hash - Math.floor(hash) - 0.5) * 0.3;
+        // Primary flowing waves (large gentle undulations)
+        noise += Math.sin(x + seed) * 0.45;
+        noise += Math.cos(z + seed * 1.3) * 0.35;
         
-        return noise;
+        // Secondary cross-patterns (creates ridge-like formations)
+        noise += Math.sin(x * 1.8 + z * 1.2 + seed * 0.7) * 0.25;
+        noise += Math.cos(x * 1.4 + z * 2.1 + seed * 1.9) * 0.15;
+        
+        // Tertiary fine detail (subtle surface variation)
+        noise += Math.sin(x * 3.2 + z * 2.8 + seed * 0.4) * 0.08;
+        
+        // Add smooth randomness for natural variation
+        const hash1 = Math.sin(x * 12.9898 + z * 78.233 + seed) * 43758.5453;
+        const hash2 = Math.cos(x * 93.9898 + z * 67.345 + seed * 1.5) * 28474.3829;
+        const smoothRandom = ((hash1 - Math.floor(hash1)) + (hash2 - Math.floor(hash2))) * 0.15;
+        noise += smoothRandom;
+        
+        // Apply smoothing function for more organic curves
+        return Math.tanh(noise * 0.8) * 1.25; // tanh creates smooth S-curves
     }
 
     // Method to update terrain with storm effects for wireframe only
@@ -213,15 +223,15 @@ export class TerrainPlane {
         
         // Animate mesh vertices (enhanced by storms) on top of rocky base
         const pos = this.landscapeWireframe.geometry.attributes.position;
-        const gridCells = 8; // Updated to match generateTerrainWireframe
-        const baseSize = (this.planeSize / gridCells) * 1.5; // Updated to match generateTerrainWireframe
+        const gridCells = 6; // Updated to match generateTerrainWireframe
+        const baseSize = this.planeSize / gridCells; // Updated to match generateTerrainWireframe
         
         for (let x = 0; x <= gridCells; x++) {
             for (let z = 0; z <= gridCells; z++) {
                 const vertexIndex = x * (gridCells + 1) + z;
-                const spreadFactor = 1.2; // Updated to match createLandscapeWireframe
-                const px = this.position.x + (x - gridCells / 2) * baseSize * spreadFactor;
-                const pz = this.position.z + (z - gridCells / 2) * baseSize * spreadFactor;
+                // Calculate same world position as terrain generation
+                const px = this.position.x + (x - gridCells / 2) * baseSize;
+                const pz = this.position.z + (z - gridCells / 2) * baseSize;
                 
                 // Get the rocky base height for this vertex
                 const baseHeight = this.baseHeights ? this.baseHeights[vertexIndex] : (this.position.y + baseSize / 2);
