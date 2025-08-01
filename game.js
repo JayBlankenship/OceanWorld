@@ -1,0 +1,613 @@
+import * as THREE from 'https://cdn.skypack.dev/three@0.134.0';
+import { createPlayerPawn } from './playerPawn.js';
+// --- GLOBAL OCEAN MESH ---
+let globalOcean = null;
+let globalOceanGeometry = null;
+let globalOceanSegments = 64;
+let globalOceanTime = Math.random() * 1000;
+let globalOceanWaveState = {
+    amp: 0.5, // Calmer default amplitude
+    speed: 1.5, // Calmer default speed
+    targetAmp: 0.5,
+    targetSpeed: 1.5,
+    timer: 0,
+    storms: [] // Array of active storm systems
+};
+let globalOceanSize = 120;
+
+function createGlobalOcean(scene, size = 120, segments = 64) {
+    // Increase ocean mesh size and resolution to cover the expanded terrain area
+    size = 1200;
+    segments = 256; // Higher resolution for smoother waves
+    const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+    geometry.rotateX(-Math.PI / 2);
+    const material = new THREE.MeshBasicMaterial({
+        color: 0x00fff7,
+        wireframe: true,
+        transparent: false,
+        opacity: 1.0
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(0, 0.1, 0);
+    scene.add(mesh);
+    globalOcean = mesh;
+    globalOceanGeometry = geometry;
+    globalOceanSegments = segments;
+    globalOceanSize = size;
+}
+import { createStar } from './star.js';
+import { createAIPlayer } from './ai.js';
+import { TerrainPlane } from './terrainPlane.js';
+import { TerrainGenerator } from './terrainGenerator.js'; // Import the new class
+import { NetworkedPlayerManager } from './networkedPlayer.js'; // Import networked player system
+
+const canvas = document.getElementById('gameCanvas');
+const startButton = document.getElementById('startButton');
+const menu = document.getElementById('menu');
+const pauseMenu = document.getElementById('pauseMenu');
+const closeMenuButton = document.getElementById('closeMenu');
+const instructions = document.getElementById('instructions');
+const thetaSensitivityInput = document.getElementById('thetaSensitivity');
+const phiSensitivityInput = document.getElementById('phiSensitivity');
+
+// Global state
+let isInstructionsVisible = true;
+let isGamePaused = false;
+let isSettingsOpen = false;
+
+// Global functions for menu controls
+window.resumeGame = function() {
+    isGamePaused = false;
+    pauseMenu.style.display = 'none';
+    if (!document.pointerLockElement) {
+        canvas.requestPointerLock();
+    }
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    startButton.addEventListener('click', () => {
+        startButton.style.display = 'none';
+        canvas.style.display = 'block';
+        initGame();
+    });
+});
+
+// Load saved settings on page load
+function loadSettings() {
+    const savedTheta = localStorage.getItem('thetaSensitivity');
+    const savedPhi = localStorage.getItem('phiSensitivity');
+    if (savedTheta) thetaSensitivityInput.value = savedTheta;
+    if (savedPhi) phiSensitivityInput.value = savedPhi;
+}
+
+function initGame() {
+    const scene = new THREE.Scene();
+    // Add global animated ocean mesh (wireframe, ripple effect)
+    createGlobalOcean(scene, 120, 64);
+    // Increase far plane to 5000 and near plane to 1.0 for large world and high ocean
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1.0, 5000);
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    // Create player pawn and star
+    const playerPawn = createPlayerPawn(false); // false indicates human player
+    scene.add(playerPawn);
+
+    // Initialize networked player manager for red replicated players
+    const networkedPlayerManager = new NetworkedPlayerManager(scene);
+    console.log('[Game] NetworkedPlayerManager initialized');
+    
+    // Set up network callbacks for player replication once connected
+    if (window.Network) {
+        // Handle incoming player state updates from other clients
+        window.Network.callbacks.handlePlayerState = (peerId, state) => {
+            console.log(`[Game] Received player state from ${peerId}:`, state);
+            networkedPlayerManager.updatePlayer(peerId, state);
+        };
+        
+        // Track when players join/leave the lobby to create/remove red players
+        const originalUpdateUI = window.Network.callbacks.updateUI;
+        window.Network.callbacks.updateUI = function(peers) {
+            // Call original updateUI if it exists
+            if (originalUpdateUI) {
+                originalUpdateUI(peers);
+            }
+            
+            // Only create red players if we're in a complete lobby
+            if (window.Network.isInCompleteLobby && window.Network.isInCompleteLobby()) {
+                const currentPeerIds = window.Network.getLobbyPeerIds();
+                const existingPeerIds = Array.from(networkedPlayerManager.networkedPlayers.keys());
+                
+                console.log(`[Game] Lobby complete! Current peers:`, currentPeerIds);
+                console.log(`[Game] Existing networked players:`, existingPeerIds);
+                
+                // Add new players as red replicated pawns
+                for (const peerId of currentPeerIds) {
+                    if (!existingPeerIds.includes(peerId)) {
+                        console.log(`[Game] Creating RED networked player for peer: ${peerId}`);
+                        networkedPlayerManager.addPlayer(peerId);
+                    }
+                }
+                
+                // Remove disconnected players
+            // Update global player position for exclusion zone logic
+            window.playerPosition = playerPawn.position.clone();
+
+            // Dynamically update exclusion zone for all terrain tiles every frame
+            if (terrainGenerator && terrainGenerator.planes && typeof window.updateExclusionZoneEveryFrame === 'function') {
+                window.updateExclusionZoneEveryFrame(Array.from(terrainGenerator.planes.values()));
+            }
+                for (const peerId of existingPeerIds) {
+                    if (!currentPeerIds.includes(peerId)) {
+                        console.log(`[Game] Removing networked player for peer: ${peerId}`);
+                        networkedPlayerManager.removePlayer(peerId);
+                    }
+                }
+            }
+        };
+    }
+
+    // Create multiple AI players
+    const numberOfAIPlayers = 0; // Set this to your desired number
+    const aiPlayers = []; // Array to store all AI players
+
+    for (let i = 0; i < numberOfAIPlayers; i++) {
+        const aiPlayer = createAIPlayer();
+        
+        // Position in a spiral pattern to avoid clustering
+        const angle = (i / numberOfAIPlayers) * Math.PI * 2;
+        const radius = 70 + (i % 5) * 5; // Staggered distances
+        
+        aiPlayer.position.set(
+            Math.cos(angle) * radius,
+            0,
+            Math.sin(angle) * radius
+        );
+        
+        scene.add(aiPlayer);
+        aiPlayers.push(aiPlayer);
+    }
+
+    // Procedural ground system
+    const planeSize = 2;
+    const planeGeometry = new THREE.PlaneGeometry(planeSize, planeSize, 1, 1);
+    const planeMaterial = new THREE.MeshBasicMaterial({ 
+        color: 0x00FF00, // Neon green
+        side: THREE.DoubleSide,
+        wireframe: true
+    });
+
+    // Initialize TerrainGenerator
+    const terrainGenerator = new TerrainGenerator(scene, planeSize, planeGeometry, planeMaterial);
+
+    // Set up terrain networking callback after terrainGenerator is created
+    if (window.Network) {
+        // Handle incoming terrain changes from other clients
+        window.Network.callbacks.handleTerrainChanges = (peerId, changes) => {
+            console.log(`[Game] Received terrain changes from ${peerId}:`, changes);
+            try {
+                terrainGenerator.applyTerrainChanges(changes);
+            } catch (error) {
+                console.error('[Game] Error applying terrain changes:', error);
+            }
+        };
+    }
+
+    // Initial camera position
+    camera.position.set(0, 5, -10);
+    camera.lookAt(playerPawn.position);
+
+    // Calculate initial theta and phi
+    const initialOffset = new THREE.Vector3().subVectors(camera.position, playerPawn.position);
+    const r = initialOffset.length();
+    let theta = Math.atan2(initialOffset.x, initialOffset.z);
+    let phi = Math.atan2(initialOffset.y, Math.sqrt(initialOffset.x ** 2 + initialOffset.z ** 2));
+
+    // Mouse controls with Pointer Lock
+    let isPointerLocked = false;
+    let mouseX = 0;
+    let mouseY = 0;
+    let thetaSensitivity = parseFloat(thetaSensitivityInput.value);
+    let phiSensitivity = parseFloat(phiSensitivityInput.value);
+
+    canvas.requestPointerLock = canvas.requestPointerLock || canvas.mozRequestPointerLock;
+
+    canvas.addEventListener('click', () => {
+        if (!isPointerLocked && !menu.style.display) {
+            canvas.requestPointerLock();
+        }
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+        isPointerLocked = document.pointerLockElement === canvas;
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (isPointerLocked) {
+            mouseX = e.movementX || e.mozMovementX || 0;
+            mouseY = e.movementY || e.mozMovementY || 0;
+        }
+    });
+
+    // Update and save sensitivity from sliders
+    thetaSensitivityInput.addEventListener('input', (e) => {
+        thetaSensitivity = parseFloat(e.target.value);
+        localStorage.setItem('thetaSensitivity', thetaSensitivity);
+    });
+    phiSensitivityInput.addEventListener('input', (e) => {
+        phiSensitivity = parseFloat(e.target.value);
+        localStorage.setItem('phiSensitivity', phiSensitivity);
+    });
+
+    // Load settings when the page loads
+    loadSettings();
+
+    // Movement controls
+    const moveState = { forward: false, backward: false, left: false, right: false };
+    const playerSpeed = 5.0;
+    let lastTime = performance.now();
+    let isMenuOpen = false;
+    let animationTime = 0;
+
+    document.addEventListener('keydown', (e) => {
+        const key = e.key.toLowerCase();
+        
+        // Global hotkeys
+        if (key === 'escape') {
+            isGamePaused = !isGamePaused;
+            pauseMenu.style.display = isGamePaused ? 'block' : 'none';
+            if (isGamePaused && isPointerLocked) {
+                document.exitPointerLock();
+            } else if (!isGamePaused && !isPointerLocked) {
+                canvas.requestPointerLock();
+            }
+        }
+        
+        if (key === 'f1') {
+            isInstructionsVisible = !isInstructionsVisible;
+            instructions.classList.toggle('hidden', !isInstructionsVisible);
+        }
+        
+        if (key === 'f2') {
+            isSettingsOpen = !isSettingsOpen;
+            menu.style.display = isSettingsOpen ? 'block' : 'none';
+        }
+        
+        // Movement controls only when not paused
+        if (!isGamePaused && !isSettingsOpen) {
+            if (key === 'w') moveState.forward = true;
+            if (key === 's') moveState.backward = true;
+            if (key === 'a') moveState.left = true;
+            if (key === 'd') moveState.right = true;
+        }
+    });
+
+    document.addEventListener('keyup', (e) => {
+        const key = e.key.toLowerCase();
+        if (key === 'w') moveState.forward = false;
+        if (key === 's') moveState.backward = false;
+        if (key === 'a') moveState.left = false;
+        if (key === 'd') moveState.right = false;
+    });
+
+    closeMenuButton.addEventListener('click', () => {
+        isSettingsOpen = false;
+        menu.style.display = 'none';
+        if (!isPointerLocked) {
+            canvas.requestPointerLock();
+        }
+    });
+
+    // Animation loop
+    function animate(currentTime) {
+        requestAnimationFrame(animate);
+        
+        const deltaTime = Math.min((currentTime - lastTime) / 1000, 0.1);
+        lastTime = currentTime;
+        animationTime += deltaTime;
+
+        // Update player position only if not paused
+        if (!isGamePaused && !isSettingsOpen) {
+            let direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            direction.y = 0;
+            direction.normalize();
+
+            if (moveState.forward) {
+                playerPawn.position.x += playerSpeed * deltaTime * direction.x;
+                playerPawn.position.z += playerSpeed * deltaTime * direction.z;
+            }
+            if (moveState.backward) {
+                playerPawn.position.x -= playerSpeed * deltaTime * direction.x;
+                playerPawn.position.z -= playerSpeed * deltaTime * direction.z;
+            }
+            if (moveState.left) {
+                const leftVector = new THREE.Vector3().crossVectors(camera.up, direction).normalize();
+                playerPawn.position.x += playerSpeed * deltaTime * leftVector.x;
+                playerPawn.position.z += playerSpeed * deltaTime * leftVector.z;
+            }
+            if (moveState.right) {
+                const rightVector = new THREE.Vector3().crossVectors(direction, camera.up).normalize();
+                playerPawn.position.x += playerSpeed * deltaTime * rightVector.x;
+                playerPawn.position.z += playerSpeed * deltaTime * rightVector.z;
+            }
+
+            // Update player pawn and star animations
+            // --- Make player pawn float on the true animated ocean surface (including storms) ---
+            if (globalOcean && globalOceanGeometry && playerPawn) {
+                // Use the exact same logic as the mesh for perfect sync
+                function getLocalWaveMultiplier(x, z) {
+                    let localAmp = 1.0;
+                    let swirlY = 0;
+                    if (globalOceanWaveState.storms) {
+                        for (let storm of globalOceanWaveState.storms) {
+                            const dx = x - storm.x;
+                            const dz = z - storm.z;
+                            const dist = Math.sqrt(dx * dx + dz * dz);
+                            if (dist < storm.radius) {
+                                swirlY += Math.sin(storm.swirl + dist * 0.02) * storm.amp * (1 - dist / storm.radius) * 0.5;
+                                localAmp = Math.max(localAmp, 1 + (storm.amp - 1) * (1 - dist / storm.radius));
+                            }
+                        }
+                    }
+                    const dist = Math.sqrt(x * x + z * z);
+                    let base = 1.0;
+                    if (dist < 30) base = 0.7;
+                    if (dist > 80) base = 1.5;
+                    return base * localAmp + swirlY;
+                }
+                let t = globalOceanTime;
+                let px = playerPawn.position.x;
+                let pz = playerPawn.position.z;
+                let y = 0;
+                y += Math.sin(0.09 * px + t * 0.7) * 1.2 * getLocalWaveMultiplier(px, pz);
+                y += Math.cos(0.08 * pz + t * 0.5) * 1.0 * getLocalWaveMultiplier(px, pz);
+                y += Math.sin(0.07 * (px + pz) + t * 0.3) * 0.7 * getLocalWaveMultiplier(px, pz);
+                // Offset to match ocean mesh Y position (ocean mesh is at y=0.1)
+                const aboveWaterOffset = 2.2 + 20;
+                playerPawn.position.y = y + 0.1 + aboveWaterOffset;
+            }
+            playerPawn.update(deltaTime, animationTime);
+
+            // --- Animate global ocean mesh (ripple effect) ---
+            if (globalOcean && globalOceanGeometry && playerPawn) {
+                // --- Storm system: storms can form, move, and swirl toward the player ---
+                // Update storms
+                if (!globalOceanWaveState.storms) globalOceanWaveState.storms = [];
+                // Occasionally spawn a new storm far from the player
+                if (Math.random() < deltaTime * 0.04 && globalOceanWaveState.storms.length < 2) {
+                    // Storms spawn 800-1800 units from player, random angle
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = 800 + Math.random() * 1000;
+                    globalOceanWaveState.storms.push({
+                        x: playerPawn.position.x + Math.cos(angle) * dist,
+                        z: playerPawn.position.z + Math.sin(angle) * dist,
+                        amp: 2 + Math.random() * 3, // Lower, more natural waves
+                        radius: 350 + Math.random() * 200, // Much larger, more gradual
+                        swirl: Math.random() * Math.PI * 2,
+                        swirlSpeed: 0.1 + Math.random() * 0.2,
+                        moveSpeed: 3 + Math.random() * 3,
+                        target: { x: playerPawn.position.x, z: playerPawn.position.z },
+                        age: 0
+                    });
+                }
+                // Move storms toward the player, swirl them
+                for (let storm of globalOceanWaveState.storms) {
+                    // Swirl around their center
+                    storm.swirl += storm.swirlSpeed * deltaTime;
+                    // Move toward player
+                    const dx = playerPawn.position.x - storm.x;
+                    const dz = playerPawn.position.z - storm.z;
+                    const d = Math.sqrt(dx * dx + dz * dz);
+                    if (d > 10) {
+                        storm.x += (dx / d) * storm.moveSpeed * deltaTime;
+                        storm.z += (dz / d) * storm.moveSpeed * deltaTime;
+                    }
+                    storm.age += deltaTime;
+                }
+                // Remove old storms
+                globalOceanWaveState.storms = globalOceanWaveState.storms.filter(s => s.age < 80);
+
+                // Bipolar ocean: smoothly interpolate between extreme and chill states
+                globalOceanWaveState.timer -= deltaTime;
+                if (globalOceanWaveState.timer <= 0) {
+                    // Randomly pick a new target state: either 'insane' or 'chill'
+                    if (Math.random() < 0.5) {
+                        // Insane: high amp, high speed (but can be overridden by storms)
+                        globalOceanWaveState.targetAmp = 1.2 + Math.random() * 0.7;
+                        globalOceanWaveState.targetSpeed = 2.5 + Math.random() * 1.0;
+                    } else {
+                        // Chill: low amp, low speed (but never stagnant)
+                        globalOceanWaveState.targetAmp = 0.2 + Math.random() * 0.15;
+                        globalOceanWaveState.targetSpeed = 0.7 + Math.random() * 0.3;
+                    }
+                    globalOceanWaveState.timer = 8 + Math.random() * 8;
+                }
+                // Slow down interpolation for smoother, longer transitions
+                globalOceanWaveState.amp += (globalOceanWaveState.targetAmp - globalOceanWaveState.amp) * deltaTime * 0.18;
+                globalOceanWaveState.speed += (globalOceanWaveState.targetSpeed - globalOceanWaveState.speed) * deltaTime * 0.18;
+                // Center ocean on player
+                globalOcean.position.x = playerPawn.position.x;
+                globalOcean.position.z = playerPawn.position.z;
+                globalOcean.position.y = 22.5; // Raised 20 units higher
+                globalOceanTime += deltaTime * globalOceanWaveState.speed;
+                const pos = globalOceanGeometry.attributes.position;
+                const seg = globalOceanSegments;
+                let t = globalOceanTime;
+                let px = playerPawn.position.x;
+                let pz = playerPawn.position.z;
+                let size = globalOceanSize;
+                function getLocalWaveMultiplier(x, z) {
+                    // Storms: if inside a storm, use its amp
+                    let localAmp = 1.0;
+                    let swirlY = 0;
+                    for (let storm of globalOceanWaveState.storms) {
+                        const dx = x - storm.x;
+                        const dz = z - storm.z;
+                        const dist = Math.sqrt(dx * dx + dz * dz);
+                        if (dist < storm.radius) {
+                            // Smoother, more natural swirl
+                            swirlY += Math.sin(storm.swirl + dist * 0.02) * storm.amp * (1 - dist / storm.radius) * 0.5;
+                            localAmp = Math.max(localAmp, 1 + (storm.amp - 1) * (1 - dist / storm.radius));
+                        }
+                    }
+                    // Example: Calm in center, wilder at edges
+                    const dist = Math.sqrt(x * x + z * z);
+                    let base = 1.0;
+                    if (dist < 30) base = 0.7;
+                    if (dist > 80) base = 1.5;
+                    return base * localAmp + swirlY;
+                }
+                for (let xi = 0; xi <= seg; xi++) {
+                    for (let zi = 0; zi <= seg; zi++) {
+                        const idx = xi * (seg + 1) + zi;
+                        const x = (xi - seg / 2) * (size / seg) + px;
+                        const z = (zi - seg / 2) * (size / seg) + pz;
+                        // Use local multiplier for mesh
+                        let amp = globalOceanWaveState.amp;
+                        let y = 0;
+                        // Add storm/localized effect
+                        y += Math.sin(0.09 * x + t * 0.7) * 1.2 * getLocalWaveMultiplier(x, z);
+                        y += Math.cos(0.08 * z + t * 0.5) * 1.0 * getLocalWaveMultiplier(x, z);
+                        y += Math.sin(0.07 * (x + z) + t * 0.3) * 0.7 * getLocalWaveMultiplier(x, z);
+                        pos.setY(idx, y);
+                    }
+                }
+                pos.needsUpdate = true;
+                globalOceanGeometry.computeVertexNormals();
+            }
+            // Broadcast our position to other players if we're in a complete lobby
+            if (window.Network && window.Network.isInCompleteLobby && window.Network.isInCompleteLobby()) {
+                // Create player state object
+                const playerState = {
+                    position: {
+                        x: playerPawn.position.x,
+                        y: playerPawn.position.y,
+                        z: playerPawn.position.z
+                    },
+                    rotation: {
+                        x: playerPawn.rotation.x,
+                        y: playerPawn.rotation.y,
+                        z: playerPawn.rotation.z
+                    },
+                    surgeActive: playerPawn.surgeActive || false
+                };
+                
+                // Throttle network updates to avoid spam (send every ~100ms)
+                const now = Date.now();
+                if (!window.lastNetworkUpdate || now - window.lastNetworkUpdate > 100) {
+                    window.Network.broadcastPlayerState(playerState);
+                    window.lastNetworkUpdate = now;
+                }
+            }
+
+            // Update red networked players (animate them smoothly)
+            networkedPlayerManager.update(deltaTime, animationTime);
+
+            // Broadcast terrain changes to other players if we're in a complete lobby
+            if (window.Network && window.Network.isInCompleteLobby && window.Network.isInCompleteLobby() && terrainGenerator && typeof terrainGenerator.getTerrainChanges === 'function') {
+                try {
+                    // Get terrain changes from this frame
+                    const terrainChanges = terrainGenerator.getTerrainChanges();
+                    
+                    // Only broadcast if there are actual changes and throttle to prevent spam
+                    if (terrainChanges && (terrainChanges.newPlanes.length > 0 || terrainChanges.removedPlanes.length > 0)) {
+                        // Throttle terrain broadcasts to prevent network spam (every 500ms for safety)
+                        const now = Date.now();
+                        if (!window.lastTerrainUpdate || now - window.lastTerrainUpdate > 500) {
+                            // Limit the number of changes per broadcast
+                            const maxChangesPerUpdate = 10;
+                            const limitedChanges = {
+                                newPlanes: terrainChanges.newPlanes.slice(0, maxChangesPerUpdate),
+                                removedPlanes: terrainChanges.removedPlanes.slice(0, maxChangesPerUpdate)
+                            };
+                            
+                            console.log(`[Game] Broadcasting terrain changes:`, limitedChanges);
+                            window.Network.broadcastTerrainChanges(limitedChanges);
+                            window.lastTerrainUpdate = now;
+                        }
+                    }
+                } catch (error) {
+                    console.error('[Game] Error during terrain broadcasting:', error);
+                }
+            }
+
+            // Update all AI players
+            aiPlayers.forEach(aiPlayer => {
+                aiPlayer.updateAI(deltaTime, animationTime);
+                // Generate planes around each AI (with safety check)
+                if (terrainGenerator && typeof terrainGenerator.generateNeighboringPlanes === 'function') {
+                    terrainGenerator.generateNeighboringPlanes(aiPlayer.position);
+                }
+            });
+
+            // Generate new planes for both player and AI
+            if (terrainGenerator && typeof terrainGenerator.generateNeighboringPlanes === 'function') {
+                terrainGenerator.generateNeighboringPlanes(playerPawn.position);
+                
+                // Generate terrain around red networked players too
+                try {
+                    const networkedPlayerPositions = networkedPlayerManager.getAllPositions();
+                    if (networkedPlayerPositions.length > 0 && networkedPlayerPositions.length < 10) { // Safety limit
+                        networkedPlayerPositions.forEach(position => {
+                            if (position && position.x !== undefined && position.z !== undefined) {
+                                terrainGenerator.generateNeighboringPlanes(position);
+                            }
+                        });
+
+                        // Remove distant planes (check distance to player, AIs, and networked players)
+                        // Create a combined array of all entities for distance checking
+                        const allEntities = [...aiPlayers];
+                        networkedPlayerPositions.forEach(pos => {
+                            if (pos && pos.x !== undefined && pos.z !== undefined) {
+                                allEntities.push({ position: pos });
+                            }
+                        });
+                        if (typeof terrainGenerator.removeDistantPlanes === 'function') {
+                            terrainGenerator.removeDistantPlanes(playerPawn.position, allEntities);
+                        }
+                    } else {
+                        // Fallback to just player and AI if networked players seem invalid
+                        if (typeof terrainGenerator.removeDistantPlanes === 'function') {
+                            terrainGenerator.removeDistantPlanes(playerPawn.position, aiPlayers);
+                        }
+                    }
+                } catch (error) {
+                    console.error('[Game] Error with networked player terrain:', error);
+                    // Fallback to just player and AI terrain
+                    if (typeof terrainGenerator.removeDistantPlanes === 'function') {
+                        terrainGenerator.removeDistantPlanes(playerPawn.position, aiPlayers);
+                    }
+                }
+            } else {
+                console.warn('[Game] terrainGenerator not available or missing methods');
+            }
+
+            // Update camera based on mouse movement
+            if (isPointerLocked && (mouseX !== 0 || mouseY !== 0)) {
+                theta -= mouseX * thetaSensitivity;
+                phi -= mouseY * phiSensitivity;
+                phi = Math.max(0.1, Math.min(1.2, phi));
+                theta = ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+                mouseX = 0;
+                mouseY = 0;
+            }
+
+            // Update camera position
+            const horizontalDistance = r * Math.cos(phi);
+            camera.position.x = playerPawn.position.x + horizontalDistance * Math.sin(theta);
+            camera.position.z = playerPawn.position.z + horizontalDistance * Math.cos(theta);
+            camera.position.y = playerPawn.position.y + r * Math.sin(phi);
+            camera.lookAt(playerPawn.position);
+        }
+
+        renderer.render(scene, camera);
+    }
+    animate(performance.now());
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+}
